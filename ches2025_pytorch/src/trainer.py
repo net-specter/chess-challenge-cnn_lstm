@@ -1,6 +1,7 @@
 import torch
 import time
 from torch import nn
+import torch.optim.radam
 from src.net import MLP, CNN, weight_init
 
 def trainer(config,num_epochs,num_sample_pts, dataloaders,dataset_sizes,model_type, classes, device):
@@ -17,6 +18,12 @@ def trainer(config,num_epochs,num_sample_pts, dataloaders,dataset_sizes,model_ty
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     elif config["optimizer"] == "RMSprop":
         optimizer = torch.optim.RMSprop(model.parameters(), lr=lr)
+    elif config["optimizer"] == "NAdam":
+        optimizer = torch.optim.NAdam(model.parameters(), lr=lr)
+    elif config["optimizer"] == "RAdam":
+        optimizer = torch.optim.RAdam(model.parameters(), lr=lr)
+    elif config["optimizer"] == "AdamW":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
     # This is the trainning Loop
     criterion = nn.CrossEntropyLoss()

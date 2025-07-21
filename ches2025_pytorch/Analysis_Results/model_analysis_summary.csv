@@ -1,9 +1,0 @@
-Model_Path,Model_Type,Final_Rank,Success,NTGE,Batch_Size,Learning_Rate,Optimizer
-model_11.pth,cnn_lstm_light,54.0,False,No Success,200,0.0001,RMSprop
-model_13.pth,cnn_lstm_light,0.0,True,3594,500,0.0005,Adam
-model_14.pth,cnn_lstm_light,0.0,True,6345,100,0.001,AdamW
-model_18.pth,cnn_lstm_light,33.0,False,No Success,300,0.0001,RMSprop
-model_4.pth,cnn_lstm_light,0.0,True,1503,300,0.001,AdamW
-model_5.pth,cnn_lstm_light,0.0,True,41785,100,0.0001,Adam
-model_8.pth,cnn_lstm_light,0.0,True,1031,300,0.0005,AdamW
-model_9.pth,cnn_lstm_light,0.0,True,17292,500,0.0001,AdamW

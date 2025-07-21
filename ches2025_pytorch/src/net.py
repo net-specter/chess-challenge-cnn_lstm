@@ -3,7 +3,6 @@ import random
 
 import torch.nn as nn
 import torch.nn.functional as F
-from .cnn_lstm_sca import CNN_LSTM_SCA, CNN_LSTM_Light, create_cnn_lstm_sca_config
 
 class MLP(nn.Module):
     def __init__(self, search_space,num_sample_pts, classes):
@@ -217,92 +216,34 @@ def weight_init(m, type = 'kaiming_uniform_'):
 
 def create_hyperparameter_space(model_type):
     if model_type == "mlp":
-        search_space = {"batch_size": random.randrange(100, 1001, 100),
-                                                   "lr": random.choice( [1e-3, 5e-4, 1e-4, 5e-5, 1e-5]),  # 1e-3, 5e-3, 1e-4, 5e-4
-                                                    "optimizer": random.choice( ["RMSprop", "Adam"]),
-                                                    "layers": random.randrange(1, 8, 1),
-                                                    "neurons": random.choice( [10, 20, 50, 100, 200, 300, 400, 500]),
-                                                    "activation": random.choice(  ["relu", "selu", "elu", "tanh"]),
-                                                    "kernel_initializer": random.choice(["random_uniform", "glorot_uniform", "he_uniform"]),
-                                                }
+        search_space = {
+            "batch_size": random.choice([64, 128, 256, 512, 1024]),
+            "lr": random.choice([1e-3, 5e-4, 1e-4, 5e-5, 1e-5]),
+            "optimizer": random.choice(["AdamW", "Adam", "RMSprop"]),
+            "weight_decay": random.choice([0.0, 1e-5, 1e-4, 1e-3]),
+            "dropout_rate": random.choice([0.0, 0.1, 0.2, 0.3, 0.4, 0.5]),
+            "layers": random.randrange(2, 6, 1),
+            "neurons": random.choice([200, 300, 400, 500, 750, 1000, 1500]),
+            "activation": random.choice(["relu", "selu", "elu", "tanh", "leaky_relu"]),
+            "kernel_initializer": random.choice(["he_uniform", "glorot_uniform"]),
+        }
         return search_space
     elif model_type == "cnn":
-        search_space = {"batch_size": random.randrange(100, 1001, 100),
+        search_space = {"batch_size": random.choice([64, 128, 256, 512, 1024]),
                                               "lr":random.choice( [1e-3, 5e-4, 1e-4, 5e-5, 1e-5]),  # 1e-3, 5e-3, 1e-4, 5e-4
-                                              "optimizer":random.choice(["RMSprop", "Adam"]),
-                                              "layers": random.randrange(1, 8, 1),
+                                              "optimizer":random.choice(["RAdam","AdamW","NAdam","Adam"]),
+                                              "weight_decay": random.choice([0.0, 1e-5, 1e-4, 1e-3]),
+                                              "dropout_rate": random.choice([0.0, 0.1, 0.2, 0.3, 0.4, 0.5]),
+                                              "layers": random.randrange(1, 4),
                                               "neurons": random.choice( [10, 20, 50, 100, 200, 300, 400, 500]),
                                               "activation": random.choice( ["relu", "selu", "elu", "tanh"]),
                                               "kernel_initializer": random.choice( ["random_uniform", "glorot_uniform", "he_uniform"]),
                                               "pooling_types": random.choice(["max_pool", "average_pool"]),
-                                              "pooling_sizes":random.choice(  [2,4,6,8,10]), #size == strides
-                                              "conv_layers": random.choice( [1,2,3,4]),
-                                              "filters": random.choice( [4,8,12,16]),
+                                              "pooling_sizes": random.choice([2, 3, 4]),
+                                              "conv_layers": random.choice( [2,3,4,5]),
+                                              "filters": random.choice([16, 32, 64, 96, 128, 192]),
                                               "kernels": random.choice( [i for i in range(26,53,2)]), #strides = kernel/2
                                               "padding": random.choice(  [0,4,8,12,16]),
                                         }
 
-        return search_space
-    elif model_type == "cnn_lstm_sca":
-        search_space = {
-            "batch_size": random.randrange(50, 301, 50),  # Smaller batches for memory efficiency
-            "lr": random.choice([1e-3, 5e-4, 1e-4, 5e-5]),
-            "optimizer": random.choice(["Adam", "RMSprop"]),
-            "patience": 30,  # Early stopping patience set to 30 epochs
-            
-            # CNN configuration
-            "cnn_channels": random.choice([
-                [32, 64, 128],
-                [32, 64, 128, 256], 
-                [16, 32, 64, 128],
-                [64, 128, 256]
-            ]),
-            "cnn_kernels": random.choice([
-                [11, 7, 5],
-                [11, 7, 5, 3],
-                [15, 11, 7, 5],
-                [9, 7, 5, 3]
-            ]),
-            "use_attention": random.choice([True, False]),
-            
-            # LSTM configuration
-            "lstm_hidden_size": random.choice([64, 128, 256]),
-            "lstm_num_layers": random.choice([1, 2]),
-            "lstm_dropout": random.choice([0.1, 0.2, 0.3]),
-            "bidirectional": random.choice([True, False]),
-            
-            # Classification configuration
-            "fc_hidden": random.choice([128, 256, 512]),
-            "dropout": random.choice([0.3, 0.4, 0.5, 0.6]),
-        }
-        return search_space
-    elif model_type == "cnn_lstm_light":
-        # Choose CNN architecture first
-        cnn_config = random.choice([
-            {"channels": [32, 64], "kernels": [11, 7]},           # Very light
-            {"channels": [32, 64, 128], "kernels": [11, 7, 5]},  # Default light
-            {"channels": [16, 32, 64], "kernels": [9, 5, 3]},    # Even lighter
-            {"channels": [32, 64, 96], "kernels": [15, 9, 5]},   # Slightly different
-        ])
-        
-        search_space = {
-            # Training parameters
-            "batch_size": random.randrange(100, 501, 100),
-            "lr": random.choice([1e-3, 5e-4, 1e-4]),
-            # "optimizer": random.choice(["AdamW","Adam", "RMSprop"]),
-            "optimizer": "RMSprop",
-            "patience": 30,  # Early stopping patience set to 30 epochs
-            
-            # CNN architecture parameters (matched set)
-            "cnn_channels": cnn_config["channels"],
-            "cnn_kernels": cnn_config["kernels"],
-            
-            # LSTM parameters (compatible with CNN output)
-            "lstm_hidden_size": random.choice([32, 64, 96]),
-            "lstm_num_layers": random.choice([1, 2]),
-            "lstm_dropout": random.choice([0.0, 0.1, 0.2]),
-            
-            # Classification parameters
-            "dropout": random.choice([0.2, 0.3, 0.4, 0.5]),
-        }
         return search_space
