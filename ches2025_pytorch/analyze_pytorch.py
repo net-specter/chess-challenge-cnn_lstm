@@ -6,9 +6,9 @@ import torch
 
 from torchvision.transforms import transforms
 from src.dataloader import ToTensor_trace, Custom_Dataset
-from src.net import create_hyperparameter_space, MLP, CNN
+from src.net import create_hyperparameter_space, MLP, CNN, CNN_LSTM_SCA # Added CNN_LSTM_SCA
 from src.trainer import trainer
-from src.utils import evaluate_fast, AES_Sbox, calculate_HW
+from src.utils import evaluate_fast, AES_Sbox, calculate_HW # Changed evaluate to evaluate_fast
 
 if __name__=="__main__":
     dataset = "CHES_2025"

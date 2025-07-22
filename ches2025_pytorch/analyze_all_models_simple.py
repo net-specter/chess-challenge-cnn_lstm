@@ -8,7 +8,7 @@ import torch
 
 from torchvision.transforms import transforms
 from src.dataloader import ToTensor_trace, Custom_Dataset
-from src.net import create_hyperparameter_space, MLP, CNN
+from src.net import create_hyperparameter_space, MLP, CNN, CNN_LSTM_Light
 from src.trainer import trainer
 from src.utils import evaluate_fast, AES_Sbox, calculate_HW
 
@@ -28,11 +28,15 @@ def find_all_models(result_root="./Result/"):
                     dataset = parts[0]
                     leakage = parts[-1]
                 
-                    if "mlp" in dir_name:
+                    # Better model type detection
+                    if "cnn_lstm_light" in dir_name:
+                        model_type = "cnn_lstm_light"
+                    elif "mlp" in dir_name:
                         model_type = "mlp"
                     elif "cnn" in dir_name:
                         model_type = "cnn"
                     else:
+                        print(f"⚠️ Unknown model type in directory: {dir_name}")
                         continue
                     
                     # Find model files (prioritize final models)
@@ -157,11 +161,16 @@ if __name__=="__main__":
             model_type = model_info['model_type']
             config = np.load(model_info['config_path'], allow_pickle=True).item()
             
+            print(f"🔧 Model type: {model_type}")
+            print(f"📋 Config keys: {list(config.keys())}")
+            
             # Create model instance based on type
             if model_type == "mlp":
                 model = MLP(config, num_sample_pts, classes).to(device)
             elif model_type == "cnn":
                 model = CNN(config, num_sample_pts, classes).to(device)
+            elif model_type == "cnn_lstm_light":
+                model = CNN_LSTM_Light(config, num_sample_pts, classes).to(device)
             else:
                 print(f"❌ Unsupported model type: {model_type}")
                 continue
@@ -173,6 +182,7 @@ if __name__=="__main__":
             print(f"✅ Model loaded: {model_type}")
             print(f"📁 Config: {model_info['config_path']}")
             print(f"🧠 Weights: {model_info['model_path']}")
+            print(f"🔢 Parameters: {model.number_of_parameters():,}")
             ###############################################################################
 
             ####All model will be evaluated based on this function, if it does not adhere to the following, it will be eliminated. ##################
@@ -203,6 +213,7 @@ if __name__=="__main__":
                 
         except Exception as e:
             print(f"❌ Error processing model: {str(e)}")
+            print(f"📋 Config content: {config if 'config' in locals() else 'Could not load config'}")
             result = {
                 'model_idx': model_info['model_idx'],
                 'model_type': model_info['model_type'],
