@@ -1,57 +1,58 @@
+# main_pytorch.py
+
 import os
 import random
 from copy import deepcopy
 import numpy as np
 import torch
-import time # For unique TensorBoard log directories
+import time 
 
-from torchvision.transforms import transforms
-from torch.utils.tensorboard import SummaryWriter # Import SummaryWriter
+from torchvision import transforms 
+from torch.utils.tensorboard import SummaryWriter 
+import matplotlib.pyplot as plt 
 
-# Import your custom modules
+
+# Import custom modules
 from src.dataloader import ToTensor_trace, Custom_Dataset
-from src.net import create_hyperparameter_space, MLP, CNN, CNN_LSTM_SCA # Keep CNN_LSTM_SCA
-from src.trainer import trainer # Ensure trainer is updated to accept writer and trial_id
-from src.utils import evaluate_fast, AES_Sbox, calculate_HW, HW_lookup_table # Import HW_lookup_table
+from src.net import create_hyperparameter_space, MLP, CNN, CNN_LSTM_SCA 
+from src.trainer import trainer 
+from src.utils import evaluate_fast, AES_Sbox, calculate_HW, HW_lookup_table 
+
 
 if __name__ == "__main__":
-    # --- Configuration Constants ---
-    dataset = "CHES_2025"
-    model_type = "cnn_lstm_sca" # Keep as cnn_lstm_sca
-    leakage = "HW" # "ID" for Sbox output (256 classes), "HW" for Hamming Weight (9 classes)
+    # --- GLOBAL CHALLENGE & MODEL CONFIGURATION ---
+    dataset = "CHES_2025" 
+    model_type = "cnn_lstm_sca" 
+    leakage = "HW" 
     
-    train_models = True # Set to False to only evaluate pre-trained models
-    num_epochs = 100 # Maximum number of epochs for training each model configuration (early stopping will cut this short)
-    total_num_models = 50 # Number of random hyperparameter configurations to test
+    # --- TRAINING & HYPERPARAMETER SEARCH CONTROL ---
+    run_hyperparameter_search = True 
+    total_num_models_to_search = 50 
+    num_epochs_per_trial = 100 
 
-    # --- Best Model Loading/Evaluation Control ---
-    # Set to True to load a specific best model for final evaluation/submission (skips search)
+    # --- SPECIFIC BEST MODEL LOADING & EVALUATION CONTROL ---
     use_specific_best_model = False 
-    # If use_specific_best_model is True, specify its path and config:
-    SPECIFIC_MODEL_PATH = "Result/CHES_2025_cnn_lstm_sca_HW/models/model_X.pth" # Replace X with actual model_id
-    SPECIFIC_CONFIG_PATH = "Result/CHES_2025_cnn_lstm_sca_HW/models/model_configuration_X.npy" # Replace X with actual model_id
+    BEST_MODEL_TRIAL_ID = 0 
+    SPECIFIC_MODEL_PATH = os.path.join("Result", f"{dataset}_{model_type}_{leakage}", "models", f"model_{BEST_MODEL_TRIAL_ID}.pth")
+    SPECIFIC_CONFIG_PATH = os.path.join("Result", f"{dataset}_{model_type}_{leakage}", "models", f"model_configuration_{BEST_MODEL_TRIAL_ID}.npy")
 
-    # --- SCA Preprocessing Parameters ---
-    # These parameters are passed to Custom_Dataset for raw trace processing.
-    # Experiment with these to optimize performance for your dataset.
-    TRACE_START_POINT = 0 # Start index for trace cropping (POI). E.g., 500 for a specific window.
-    TRACE_END_POINT = None # End index for trace cropping (POI). None for full trace after start_point. E.g., 1500 for 500:1500 window.
-    
-    DENOISING_FILTER_TYPE = 'gaussian' # Options: None, 'gaussian', 'moving_average'
-    DENOISING_FILTER_WINDOW = 5 # Window size for the denoising filter (odd integer recommended for gaussian/moving_average)
-    
-    ALIGN_TRACES = True # Whether to perform trace alignment (cross-correlation based)
-    # alignment_ref_trace can be manually set to a specific strong trace,
-    # or if None, the first profiling trace will be used by Custom_Dataset.
+
+    # --- SCA PREPROCESSING PARAMETERS ---
+    PROCESSED_DATA_FILEPATH = "./processed_ches_data.h5" 
+    TRACE_START_POINT = 0 
+    TRACE_END_POINT = None 
+    DENOISING_FILTER_TYPE = 'gaussian' 
+    DENOISING_FILTER_WINDOW = 5 
+    ALIGN_TRACES = True 
     ALIGNMENT_REF_TRACE = None 
 
-    # --- Attack Evaluation Parameters (as per CHES Challenge rules) ---
-    nb_attacks_for_eval = 100 # Number of attack experiments for GE/NTGE calculation
-    nb_traces_for_final_eval = 1700 # Max traces to use for GE/NTGE evaluation
-    total_attack_traces_available = 2000 # Total attack traces loaded from dataset
+    # --- ATTACK EVALUATION PARAMETERS ---
+    nb_attacks_for_eval = 100 
+    nb_traces_for_final_eval = 100000 
+    total_attack_traces_available = 100000 
 
-    # --- Setup Directories ---
-    log_base_dir = './runs/' # Base directory for TensorBoard logs
+    # --- SETUP DIRECTORIES ---
+    log_base_dir = './runs/' 
     if not os.path.exists(log_base_dir):
         os.makedirs(log_base_dir)
 
@@ -62,7 +63,7 @@ if __name__ == "__main__":
     save_root = os.path.join(results_base_dir, f"{dataset}_{model_type}_{leakage}/")
     model_root = os.path.join(save_root, "models/")
     
-    print(f"Results will be saved to: {save_root}")
+    print(f"Results for this run will be saved to: {save_root}")
     print(f"Models will be saved to: {model_root}")
     
     if not os.path.exists(save_root):
@@ -70,151 +71,185 @@ if __name__ == "__main__":
     if not os.path.exists(model_root):
         os.makedirs(model_root)
 
-    # --- Set Random Seeds for Reproducibility ---
+    # --- SET RANDOM SEEDS FOR REPRODUCIBILITY ---
     seed = 0
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False # Set to False for deterministic behavior
+    torch.backends.cudnn.deterministic = True 
+    torch.backends.cudnn.benchmark = False 
 
-    # --- Device Configuration ---
+    # --- DEVICE CONFIGURATION ---
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    print(f"Training will use device: {device}")
 
-    # --- Leakage Model and Classes Definition ---
+    # --- LEAKAGE MODEL AND CLASSES DEFINITION ---
     if leakage == 'ID':
         def leakage_fn(att_plt, k_guess):
             return AES_Sbox[k_guess ^ int(att_plt)]
-        classes = 256
+        classes = 256 
     elif leakage == 'HW':
         def leakage_fn(att_plt, k_guess):
-            # HW_lookup_table is imported from utils.py
             return HW_lookup_table[AES_Sbox[k_guess ^ int(att_plt)]]
-        classes = 9
+        classes = 9 
     else:
-        raise ValueError("Invalid leakage model. Choose 'ID' or 'HW'.")
+        raise ValueError("Invalid leakage model specified. Choose 'ID' or 'HW'.")
 
-    # --- Data Loading and Preparation ---
-    # Custom_Dataset loads data, handles preprocessing, and can split into train/val/test
-    # The `leakage` parameter passed here ensures the labels are generated correctly.
-    dataloadertrain = Custom_Dataset(root='./../', dataset=dataset, leakage=leakage, 
-                                     transform=transforms.Compose([ToTensor_trace()]))
+    # --- Data Loading and Preparation (Initial Load/Preprocess) ---
+    dataset_h5_path = './../Dataset/CHES_2025/CHES_Challenge.h5' 
 
-    # Split the loaded attack set into validation and test sets (from public attack traces)
-    # This is used for local evaluation of model performance during hyperparameter search.
-    dataloadertrain.split_attack_set_validation_test() 
+    # The first Custom_Dataset instance will trigger the full data loading and preprocessing,
+    # and save it to PROCESSED_DATA_FILEPATH.
+    dataloadertrain_master = Custom_Dataset(root='./../', dataset=dataset, leakage=leakage, 
+                                     transform=transforms.Compose([ToTensor_trace()]),
+                                     trace_start_point=TRACE_START_POINT,
+                                     trace_end_point=TRACE_END_POINT,
+                                     denoising_filter_type=DENOISING_FILTER_TYPE,
+                                     denoising_filter_window=DENOISING_FILTER_WINDOW,
+                                     align_traces=ALIGN_TRACES,
+                                     alignment_ref_trace=ALIGNMENT_REF_TRACE, 
+                                     processed_data_filepath=PROCESSED_DATA_FILEPATH
+                                     )
+
+    # Extract the fully processed NumPy arrays from the first Custom_Dataset instance.
+    # These arrays will be passed to subsequent Custom_Dataset instances to avoid re-loading/re-processing.
+    X_profiling_processed = dataloadertrain_master.X_profiling
+    X_attack_processed = dataloadertrain_master.X_attack
+    Y_profiling_processed = dataloadertrain_master.Y_profiling
+    Y_attack_processed = dataloadertrain_master.Y_attack
+    P_profiling_processed = dataloadertrain_master.plt_profiling
+    P_attack_processed = dataloadertrain_master.plt_attack
+    correct_key_processed = dataloadertrain_master.correct_key
     
-    # Set the dataset to expose profiling data for training phase
-    dataloadertrain.choose_phase("train") 
+    # --- Perform the split on the master dataset instance ---
+    dataloadertrain_master.split_attack_set_validation_test() 
+
+    # --- Create Custom_Dataset instances for each phase, sharing the processed data ---
+    # The 'train' DataLoader will use the profiling data
+    # (No need to create a new instance for dataloadertrain_master, just ensure its phase is set)
+    dataloadertrain_master.choose_phase("train") 
     
-    # Create deep copies and set phases for validation and testing
-    dataloadertest = deepcopy(dataloadertrain)
+    # Create new instances for test and validation, explicitly passing the pre-loaded data
+    # AND performing the split on each new instance.
+    dataloadertest = Custom_Dataset(root='./../', dataset=dataset, leakage=leakage, 
+                                    transform=transforms.Compose([ToTensor_trace()]),
+                                    X_profiling_preloaded=X_profiling_processed, X_attack_preloaded=X_attack_processed,
+                                    Y_profiling_preloaded=Y_profiling_processed, Y_attack_preloaded=Y_attack_processed,
+                                    P_profiling_preloaded=P_profiling_processed, P_attack_preloaded=P_attack_processed,
+                                    correct_key_preloaded=correct_key_processed)
+    # *** FIX: Call split_attack_set_validation_test on the new dataloadertest instance ***
+    dataloadertest.split_attack_set_validation_test() # Perform split on this instance
     dataloadertest.choose_phase("test") 
     
-    dataloaderval = deepcopy(dataloadertrain)
+    dataloaderval = Custom_Dataset(root='./../', dataset=dataset, leakage=leakage, 
+                                   transform=transforms.Compose([ToTensor_trace()]),
+                                   X_profiling_preloaded=X_profiling_processed, X_attack_preloaded=X_attack_processed,
+                                   Y_profiling_preloaded=Y_profiling_processed, Y_attack_preloaded=Y_attack_processed,
+                                   P_profiling_preloaded=P_profiling_processed, P_attack_preloaded=P_attack_processed,
+                                   correct_key_preloaded=correct_key_processed)
+    # *** FIX: Call split_attack_set_validation_test on the new dataloaderval instance ***
+    dataloaderval.split_attack_set_validation_test() # Perform split on this instance
     dataloaderval.choose_phase("validation")
 
-    # Extract common data needed for evaluation (from the full attack set loaded by Custom_Dataset)
-    correct_key = dataloadertrain.correct_key 
-    # Use the processed X_attack from the dataset for evaluation
-    X_attack = dataloadertrain.X_attack 
-    Y_attack = dataloadertrain.Y_attack # This Y_attack is used for accuracy metrics if calculated
-    plt_attack = dataloadertrain.plt_attack 
-    # Get actual trace length after all preprocessing (cropping)
-    num_sample_pts = X_attack.shape[-1] 
+    # Extract common data needed for evaluation (from the processed data, now accessible via any dataloader)
+    correct_key = correct_key_processed # Use the processed key
+    X_attack = X_attack_processed # Use the processed attack traces
+    plt_attack = P_attack_processed # Use the processed attack plaintexts
+    num_sample_pts = X_profiling_processed.shape[1] # Actual trace length after preprocessing
 
-    # --- Main Execution Logic ---
-    if train_models:
-        # --- Hyperparameter Search Loop (Random Search) ---
-        for num_models_trial_id in range(total_num_models):
-            print(f"\n--- Running Model Trial {num_models_trial_id+1}/{total_num_models} ---")
+
+    # --- MAIN EXECUTION LOGIC: HYPERPARAMETER SEARCH OR SPECIFIC MODEL EVALUATION ---
+    if run_hyperparameter_search:
+        best_overall_ntge = float('inf') 
+        best_overall_final_ge = float('inf') 
+        best_model_trial_id = -1 
+        best_model_config = None 
+
+        for num_models_trial_id in range(total_num_models_to_search):
+            print(f"\n--- Running Model Trial {num_models_trial_id+1}/{total_num_models_to_search} ---")
             
-            # --- Clear CUDA cache at the start of each trial to free up GPU memory ---
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 print("CUDA cache cleared.")
 
-            # --- TensorBoard Setup for Current Trial ---
             current_time_str = time.strftime("%Y%m%d-%H%M%S")
             trial_log_dir = os.path.join(log_base_dir, f"{model_type}_{leakage}_trial_{num_models_trial_id}_{current_time_str}")
             writer = SummaryWriter(log_dir=trial_log_dir)
 
-            # --- Model Training Phase ---
-            # Generate a random hyperparameter configuration for this trial
             config = create_hyperparameter_space(model_type)
             print(f"Trial {num_models_trial_id+1} Config: {config}")
-            # Save the configuration to disk
             np.save(os.path.join(model_root, f"model_configuration_{num_models_trial_id}.npy"), config)
             
-            # Prepare DataLoaders for training and validation with the current config's batch_size
             batch_size = config["batch_size"]
-            num_workers = 0 # Set to 0 for Windows compatibility; for Linux/macOS, consider os.cpu_count() // 2
+            num_workers = 0 
             
             dataloaders = {
-                "train": torch.utils.data.DataLoader(dataloadertrain, batch_size=batch_size,
+                "train": torch.utils.data.DataLoader(dataloadertrain_master, batch_size=batch_size, # Use dataloadertrain_master for training
                                                     shuffle=True, num_workers=num_workers),
                 "val": torch.utils.data.DataLoader(dataloaderval, batch_size=batch_size,
-                                                   shuffle=False, num_workers=num_workers) # No need to shuffle validation
+                                                   shuffle=False, num_workers=num_workers) 
             }
-            dataset_sizes = {"train": len(dataloadertrain), "val": len(dataloaderval)}
+            dataset_sizes = {"train": len(dataloadertrain_master), "val": len(dataloaderval)} # Use lengths from correct datasets
 
-            # Train the model, passing the TensorBoard writer and trial ID for best model saving
-            model = trainer(config, num_epochs, num_sample_pts, dataloaders, 
+            model = trainer(config, num_epochs_per_trial, num_sample_pts, dataloaders, 
                             dataset_sizes, model_type, classes, device, 
-                            writer=writer, trial_id=num_models_trial_id) # Pass writer and trial_id
+                            writer=writer, trial_id=num_models_trial_id) 
             
-            # Save the trained model's state dictionary (which is the best validation model due to early stopping)
             torch.save(model.state_dict(), os.path.join(model_root, f"model_{num_models_trial_id}.pth"))
             
-            # --- Model Evaluation Phase (Guessing Entropy & NTGE Calculation) ---
             print(f"Evaluating model for Trial {num_models_trial_id+1} on attack traces...")
             GE_curve, NTGE = evaluate_fast(device, model, X_attack, plt_attack, correct_key,
                                            leakage_fn=leakage_fn, nb_attacks=nb_attacks_for_eval, 
                                            total_nb_traces_attacks=total_attack_traces_available, 
                                            nb_traces_attacks=nb_traces_for_final_eval,
-                                           batch_size=config["batch_size"]) # Use batch_size from config for evaluation
+                                           batch_size=config["batch_size"]) 
             
-            # --- Log Attack Metrics to TensorBoard ---
             writer.add_scalar('Attack_Metrics/Final_GE_at_Max_Traces', GE_curve[-1], global_step=num_models_trial_id)
             writer.add_scalar('Attack_Metrics/NTGE', NTGE, global_step=num_models_trial_id)
             
-            # Log the GE evolution curve (GE vs. number of traces)
             config_plot_tag = f"lr_{config['lr']}_bs_{config['batch_size']}_opt_{config['optimizer']}_attn_{config.get('use_attention', 'N/A')}"
             writer.add_custom_scalars(layout={
-                'Attack GE Evolution': {
+                'Attack GE Evolution': { 
                     f'Trial_{num_models_trial_id}_{config_plot_tag}': ['Multiline', f'GE_Evolution/Trial_{num_models_trial_id}_GE_vs_Traces']
                 }
             })
             for i, ge_val in enumerate(GE_curve):
                 writer.add_scalar(f'GE_Evolution/Trial_{num_models_trial_id}_GE_vs_Traces', ge_val, global_step=i+1)
 
-            # Save GE curve and NTGE to a numpy file for later analysis
             np.save(os.path.join(model_root, f"result_{num_models_trial_id}.npy"), {"GE_curve": GE_curve, "NTGE": NTGE})
             
-            # --- Close TensorBoard Writer for Current Trial ---
             writer.close()
             print(f"Trial {num_models_trial_id+1} completed. Final GE: {GE_curve[-1]:.2f}, NTGE: {NTGE:.0f}")
 
-        print("\n--- All model trials completed! ---")
-        print(f"To view results in TensorBoard, run 'tensorboard --logdir {log_base_dir}' in your terminal.")
+        print("\n" + "="*80)
+        print("HYPERPARAMETER SEARCH COMPLETE")
+        print(f"Total trials executed: {total_num_models_to_search}")
+        if best_model_trial_id != -1:
+            print(f"\n🏆 BEST MODEL FOUND DURING SEARCH:")
+            print(f"   Trial ID: {best_model_trial_id}")
+            print(f"   NTGE: {best_overall_ntge:.0f}")
+            print(f"   Final GE (at {nb_traces_for_final_eval} traces): {best_overall_final_ge:.2f}")
+            print(f"   Configuration: {best_model_config}")
+            print(f"   To re-evaluate this specific model, set `use_specific_best_model = True` and `BEST_MODEL_TRIAL_ID = {best_model_trial_id}` at the top of this script.")
+        else:
+            print("No models achieved a finite NTGE (all attacks were unsuccessful in reaching GE=0).")
+        print("="*80)
+        print(f"To view detailed results in TensorBoard, run 'tensorboard --logdir {log_base_dir}' in your terminal.")
 
     else: # --- Evaluate a Specific Best Model ---
-        print(f"\n--- Loading and Evaluating Specific Best Model ---")
-        # Clear CUDA cache
+        print(f"\n--- Loading and Evaluating Specific Best Model (Trial ID: {BEST_MODEL_TRIAL_ID}) ---")
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             print("CUDA cache cleared.")
 
-        # Load configuration of the specific model
         if not os.path.exists(SPECIFIC_CONFIG_PATH):
-            raise FileNotFoundError(f"Specific config file not found: {SPECIFIC_CONFIG_PATH}")
+            raise FileNotFoundError(f"Specific config file not found: {SPECIFIC_CONFIG_PATH}. "
+                                    f"Please ensure BEST_MODEL_TRIAL_ID is correct and the file exists.")
         config = np.load(SPECIFIC_CONFIG_PATH, allow_pickle=True).item()
         print(f"Loaded Config: {config}")
 
-        # Instantiate model based on loaded config
         if model_type == "mlp":
             model = MLP(config, num_sample_pts, classes).to(device)
         elif model_type == "cnn":
@@ -222,27 +257,27 @@ if __name__ == "__main__":
         elif model_type == "cnn_lstm_sca":
             model = CNN_LSTM_SCA(config, num_sample_pts, classes).to(device)
         else:
-            raise ValueError(f"Unknown model type for specific best model: {model_type}")
+            raise ValueError(f"Unknown model type for specific best model: {model_type}. Check `model_type` global variable.")
 
-        # Load the saved weights
         if not os.path.exists(SPECIFIC_MODEL_PATH):
-            raise FileNotFoundError(f"Specific model weights file not found: {SPECIFIC_MODEL_PATH}")
+            raise FileNotFoundError(f"Specific model weights file not found: {SPECIFIC_MODEL_PATH}. "
+                                    f"Please ensure BEST_MODEL_TRIAL_ID is correct and the file exists.")
         model.load_state_dict(torch.load(SPECIFIC_MODEL_PATH))
         model.to(device)
-        model.eval() # Set to evaluation mode
-        print(f"Model loaded from: {SPECIFIC_MODEL_PATH}")
+        model.eval() 
+        print(f"Model loaded successfully from: {SPECIFIC_MODEL_PATH}")
 
-        # --- Perform Final Evaluation ---
         print(f"Performing final evaluation of the best model...")
         GE_curve, NTGE = evaluate_fast(device, model, X_attack, plt_attack, correct_key,
                                        leakage_fn=leakage_fn, nb_attacks=nb_attacks_for_eval, 
                                        total_nb_traces_attacks=total_attack_traces_available, 
                                        nb_traces_attacks=nb_traces_for_final_eval,
-                                       batch_size=config["batch_size"]) # Use its own batch_size
+                                       batch_size=config["batch_size"]) 
         
-        print(f"\n--- Final Best Model Evaluation Results ---")
+        print(f"\n--- FINAL BEST MODEL EVALUATION RESULTS ---")
         print(f"Model Type: {model_type}")
         print(f"Leakage: {leakage}")
         print(f"Final GE (averaged over {nb_attacks_for_eval} attacks): {GE_curve[-1]:.2f}")
         print(f"NTGE: {NTGE:.0f}")
         print(f"Raw GE Curve (up to {nb_traces_for_final_eval} traces):\n{GE_curve}")
+        print("="*80)
