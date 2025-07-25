@@ -1,6 +1,7 @@
 import math
 import random
-
+import numpy as np, torch, torch.nn.functional as F
+from torch.utils.data import TensorDataset, DataLoader
 import h5py
 import numpy as np
 from sklearn.metrics import accuracy_score
@@ -241,3 +242,65 @@ def evaluate(device, model, X_attack, plt_attack,correct_key,leakage_fn, nb_atta
     print("GE", GE)
     print("NTGE", NTGE)
     return GE,NTGE
+
+HW = np.array([bin(x).count("1") for x in range(256)]) # 0-8 lookup
+
+def evaluate_fast(device, model,
+                  X_attack, plt_attack, correct_key,
+                  leakage_fn,
+                  nb_attacks,
+                  total_nb_traces_attacks = 2000,
+                  nb_traces_attacks       = 1700,
+                  batch_size              = 512):
+
+    model.eval()
+
+    # ---------- 1. forward pass in batches ------------------------------- #
+    ds     = TensorDataset(torch.from_numpy(X_attack[:total_nb_traces_attacks]))
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False)
+
+    logp_chunks = []
+    with torch.no_grad():
+        if torch.cuda.is_available():
+            with torch.amp.autocast(device_type='cuda'):
+                for (batch,) in loader:
+                    batch  = batch.to(device).unsqueeze(1).float()
+                    logits = model(batch)
+                    logp_chunks.append(F.log_softmax(logits, dim=1).cpu())
+        else:
+            for (batch,) in loader:
+                batch  = batch.to(device).unsqueeze(1).float()
+                logits = model(batch)
+                logp_chunks.append(F.log_softmax(logits, dim=1).cpu())
+    
+    logp = torch.cat(logp_chunks).numpy()          # (N, C)
+    C    = logp.shape[1]                           # 256 or 9
+
+    # ---------- 2. prep containers -------------------------------------- #
+    key_probs_runs = np.zeros((nb_attacks, 256), dtype=np.float64)
+    GE_curve       = np.empty(nb_traces_attacks, dtype=np.float32)
+
+    shuffles = [np.random.permutation(total_nb_traces_attacks)
+                for _ in range(nb_attacks)]
+
+    # ---------- 3. vectorised rank update using leakage_fn --------------- #
+    for t in range(nb_traces_attacks):
+        idxs     = np.array([s[t] for s in shuffles])    # (A,)
+        lp_slice = logp[idxs]                            # (A, C)
+        pt_slice = plt_attack[idxs]                      # (A,)
+
+        # Use leakage_fn to compute indices for each key hypothesis
+        for a in range(len(idxs)):  # For each attack in this batch
+            for k in range(256):    # For each key hypothesis
+                leakage_value = leakage_fn(pt_slice[a], k)
+                key_probs_runs[a, k] += lp_slice[a, leakage_value]
+
+        ranks = np.argsort(np.argsort(-key_probs_runs, axis=1), axis=1)
+        GE_curve[t] = ranks[:, correct_key].mean()
+
+    NTGE = NTGE_fn(GE_curve)
+    print(f'GE: {GE_curve}')
+    print(f"GE: {GE_curve[-1]:.2f}  |  NTGE: {NTGE:.0f}")
+
+    return GE_curve, NTGE
+    return GE_curve, NTGE

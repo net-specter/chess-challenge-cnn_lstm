@@ -12,15 +12,15 @@ from torchvision.transforms import transforms
 from src.dataloader import ToTensor_trace, Custom_Dataset
 from src.net import create_hyperparameter_space, MLP, CNN
 from src.trainer import trainer
-from src.utils import evaluate, AES_Sbox, calculate_HW
+from src.utils import evaluate_fast, AES_Sbox, calculate_HW
 
 if __name__=="__main__":
     dataset = "CHES_2025"
-    model_type = "mlp" #mlp, cnn
-    leakage = "HW" #ID, HW
+    model_type = "cnn" #mlp, cnn
+    leakage = "ID" #ID, HW
     train_models = True
     num_epochs = 50
-    total_num_models = 2
+    total_num_models = 200
     nb_traces_attacks = 1700
     total_nb_traces_attacks = 2000
 
@@ -63,10 +63,8 @@ if __name__=="__main__":
         classes = 9
     ####You can change the code above if you want to create your own leakage model.
 
-
-
     dataloadertrain = Custom_Dataset(root='./../', dataset=dataset, leakage="ID",
-                                                 transform=transforms.Compose([ToTensor_trace()]))
+                                    transform=transforms.Compose([ToTensor_trace()]),clean_data=True)
 
     ##########################################################################
 
@@ -115,5 +113,5 @@ if __name__=="__main__":
                 model = CNN(config, num_sample_pts, classes).to(device)
             model.load_state_dict(torch.load(model_root + "model_"+str(num_models)+".pth"))
         #Evaluate
-        # GE, NTGE = evaluate(device, model, X_attack, plt_attack, correct_key,leakage_fn=leakage_fn, nb_attacks=100, total_nb_traces_attacks=2000, nb_traces_attacks=1700)
-        # np.save(model_root + "/result_"+str(num_models), {"GE": GE, "NTGE": NTGE})
+        GE, NTGE = evaluate_fast(device, model, X_attack, plt_attack, correct_key,leakage_fn=leakage_fn, nb_attacks=100, total_nb_traces_attacks=2000, nb_traces_attacks=1700)
+        np.save(model_root + "/result_"+str(num_models), {"GE": GE, "NTGE": NTGE})
