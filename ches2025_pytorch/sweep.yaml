@@ -1,0 +1,36 @@
+program: main_pytorch.py
+method: bayes #grid, random, bayes
+metric:
+  name: val_loss
+  goal: minimize
+parameters:
+  batch_size:
+    values: [32, 64, 128]
+  lr:
+    values: [1.0e-05, 5.0e-06, 1.0e-06, 5.0e-07, 1.0e-07]
+  optimizer:
+    values: ["AdamW", "RAdam", "Adam", "SGD"]
+  weight_decay:
+    values: [0.0, 0.000001, 0.00001, 0.0001, 0.001]
+  dropout_rate:
+    values: [0.2, 0.3, 0.4, 0.5, 0.6]
+  conv_layers:
+    values: [3, 4, 5]
+  filters:
+    values: [32, 64, 96, 128]
+  kernels:
+    values: [5, 7, 9, 11]
+  strides:
+    values: [1, 2]
+  padding:
+    values: [0, 1]
+  pooling_types:
+    values: ["max_pool", "average_pool"]
+  pooling_sizes:
+    values: [2, 3]
+  fc_hidden_size:
+    values: [128, 256, 512]
+  activation:
+    values: ["relu", "leaky_relu", "elu", "tanh"]
+  kernel_initializer:
+    values: ["he_uniform", "glorot_uniform"]

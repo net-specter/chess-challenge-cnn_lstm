@@ -1,7 +1,8 @@
 import torch
 import time
 from torch import nn
-from src.net import MLP, CNN, weight_init
+from src.net import MLP, CNN, DeepCNN_GlobalPool, weight_init
+import wandb # Import wandb
 
 def trainer(config,num_epochs,num_sample_pts, dataloaders,dataset_sizes,model_type, classes, device):
 
@@ -10,18 +11,35 @@ def trainer(config,num_epochs,num_sample_pts, dataloaders,dataset_sizes,model_ty
         model = MLP(config, num_sample_pts, classes).to(device)
     elif model_type == "cnn":
         model = CNN(config, num_sample_pts, classes).to(device)
+    elif model_type == "deepcnn_globalpool":
+        model = DeepCNN_GlobalPool(config, num_sample_pts, classes).to(device)
     weight_init(model, config['kernel_initializer'])
     # Creates the optimizer
     lr = config["lr"]
     if config["optimizer"] == "Adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=config.get("weight_decay", 0.0)) # Added weight decay
     elif config["optimizer"] == "RMSprop":
-        optimizer = torch.optim.RMSprop(model.parameters(), lr=lr)
+        optimizer = torch.optim.RMSprop(model.parameters(), lr=lr, weight_decay=config.get("weight_decay", 0.0)) # Added weight decay
+    elif config["optimizer"] == "RAdam":
+        optimizer = torch.optim.RAdam(model.parameters(), lr=lr, weight_decay=config.get("weight_decay", 0.0)) # Added weight decay
+    elif config["optimizer"] == "NAdam":
+        optimizer = torch.optim.NAdam(model.parameters(), lr=lr, weight_decay=config.get("weight_decay", 0.0)) # Added weight decay
+    elif config["optimizer"] == "AdamW":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=config.get("weight_decay", 0.0)) # Added weight decay
+    elif config["optimizer"] == "SGD":
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=config.get("weight_decay", 0.0)) # Added weight decay
 
     # This is the trainning Loop
     criterion = nn.CrossEntropyLoss()
     # scheduler = scheduler
     start = time.time()
+    
+    # Initialize GradScaler for mixed precision, only if CUDA is available
+    scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
+
+    # Define gradient clipping value
+    grad_clip = 1.0
+
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch +1, num_epochs))
         print('-' * 10)
@@ -39,8 +57,8 @@ def trainer(config,num_epochs,num_sample_pts, dataloaders,dataset_sizes,model_ty
             # Iterate over data.
             tk0 = dataloaders[phase]  # tqdm(dataloader[phase])
             for (traces, labels) in tk0:
-                inputs = traces.to(device)
-                labels = labels.to(device)
+                inputs = traces.to(device) # Move data to the correct device
+                labels = labels.to(device) # Move data to the correct device
                 # print(labels)
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -48,16 +66,28 @@ def trainer(config,num_epochs,num_sample_pts, dataloaders,dataset_sizes,model_ty
                 # forward
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
-                    # print("outputs.shape: ", outputs.shape)
+                    # Enable mixed precision training, only if CUDA is available
+                    with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+                        outputs = model(inputs)
+                        # print("outputs.shape: ", outputs.shape)
 
-                    _, preds = torch.max(outputs, dim=1)
+                        _, preds = torch.max(outputs, dim=1)
 
-                    loss = criterion(outputs, labels)
+                        loss = criterion(outputs, labels)
 
                     if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
+                        # Scale the loss and perform backward pass, only if CUDA is available
+                        if scaler:
+                            scaler.scale(loss).backward()
+                            # Clip gradients
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                            scaler.step(optimizer)
+                            scaler.update()
+                        else:
+                            loss.backward()
+                            # Clip gradients
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                            optimizer.step()
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
@@ -69,11 +99,9 @@ def trainer(config,num_epochs,num_sample_pts, dataloaders,dataset_sizes,model_ty
             epoch_acc = running_corrects.double() / dataset_sizes[phase]
             inputs.detach()
             labels.detach()
-            # Here we calculate the GE, NTGE and the accuracy over the X_attack traces.
             print('{} Epoch Loss: {:.4f} Epoch Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
+        
         model.eval()
-        # model.to("cpu")
-        # if (epoch + 1) % 10 == 0 and epoch != 0:
 
     print("Finished Training Model")
     return model
