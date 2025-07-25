@@ -5,11 +5,9 @@ from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
 from src.utils import load_ctf_2025
 import torch
-from scipy.signal import correlate, windows
 
 class Custom_Dataset(Dataset):
-    def __init__(self, root='./', dataset="CHES_2025", leakage="HW", transform=None,
-                 poi_start=500, poi_end=1500, window_size=5, augment=True):  # Added augment parameter
+    def __init__(self, root = './', dataset = "CHES_2025", leakage = "HW",transform = None):
 
         if dataset == "CHES_2025":
             byte = 0
@@ -21,65 +19,9 @@ class Custom_Dataset(Dataset):
 
         print("The dataset we using: ", data_root)
         self.transform = transform
-        # self.scaler_std = StandardScaler() # Move scaler to after noise reduction
-        # self.X_profiling = self.scaler_std.fit_transform(self.X_profiling)
-        # self.X_attack = self.scaler_std.transform(self.X_attack)
-
-        # Noise Reduction Techniques
-        self.X_profiling = self.apply_trace_alignment(self.X_profiling)
-        self.X_attack = self.apply_trace_alignment(self.X_attack)
-
-        
-        self.poi_start = poi_start  # Example values, adjust based on your traces
-        self.poi_end = poi_end
-        self.window_size = window_size
-        self.augment = augment
-        
-        self.X_profiling = self.apply_denoising_filter(self.X_profiling)
-        self.X_attack = self.apply_denoising_filter(self.X_attack)
-
-        self.X_profiling = self.apply_poi_cropping(self.X_profiling, self.poi_start, self.poi_end)
-        self.X_attack = self.apply_poi_cropping(self.X_attack, self.poi_start, self.poi_end)
-
-        self.scaler_std = StandardScaler() # Initialize scaler after cropping
+        self.scaler_std = StandardScaler()
         self.X_profiling = self.scaler_std.fit_transform(self.X_profiling)
         self.X_attack = self.scaler_std.transform(self.X_attack)
-
-        self.split_attack_set_validation_test()
-        self.choose_phase("train")  # Initialize X and Y with training data
-
-    def apply_trace_alignment(self, traces):
-        # Cross-correlation for trace alignment
-        template = traces.mean(axis=0)  # Average trace as template
-        aligned_traces = np.zeros_like(traces)
-        for i, trace in enumerate(traces):
-            correlation = correlate(template, trace, mode='full')
-            delay = np.argmax(correlation) - (len(trace) - 1)
-            aligned_traces[i] = np.roll(trace, delay)
-        return aligned_traces
-
-    def apply_denoising_filter(self, traces):
-        # Simple moving average filter for denoising
-        window = windows.boxcar(self.window_size) / self.window_size  # Use self.window_size
-        denoised_traces = np.zeros_like(traces)
-        for i, trace in enumerate(traces):
-            denoised_traces[i] = np.convolve(trace, window, mode='same')
-        return denoised_traces
-
-    def apply_poi_cropping(self, traces, start, end):
-        # Points of Interest (POI) cropping
-        return traces[:, start:end]
-
-    def augment_trace(self, trace):
-        # Add random noise to the trace
-        noise = np.random.normal(0, 0.01, trace.shape)  # Adjust noise level as needed
-        trace = trace + noise
-
-        # Shift the trace slightly in time
-        shift = np.random.randint(-5, 5)  # Adjust shift range as needed
-        trace = np.roll(trace, shift)
-        return trace
-
     def split_attack_set_validation_test(self):
         self.X_attack_test, self.X_attack_val, self.Y_attack_test, self.Y_attack_val = train_test_split(self.X_attack,self.Y_attack,test_size=0.1,random_state=0)
 
@@ -88,8 +30,6 @@ class Custom_Dataset(Dataset):
     def choose_phase(self,phase):
         if phase == 'train':
             self.X, self.Y = np.expand_dims(self.X_profiling, 1), self.Y_profiling
-            if self.augment:
-                self.X = np.array([self.augment_trace(x) for x in self.X_profiling])  # Apply augmentation
         elif phase == 'validation':
             self.X, self.Y = np.expand_dims(self.X_attack_val, 1), self.Y_attack_val
         elif phase == 'test':

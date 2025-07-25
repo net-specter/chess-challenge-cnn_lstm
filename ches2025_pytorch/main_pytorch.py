@@ -1,3 +1,7 @@
+# This is a sample Python script.
+
+# Press Shift+F10 to execute it or replace it with your code.
+# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
 import os
 import random
 from copy import deepcopy
@@ -6,21 +10,20 @@ import torch
 
 from torchvision.transforms import transforms
 from src.dataloader import ToTensor_trace, Custom_Dataset
-from src.net import create_hyperparameter_space, MLP, CNN,DeepCNN_GlobalPool
+from src.net import create_hyperparameter_space, MLP, CNN
 from src.trainer import trainer
-from src.utils import evaluate_fast, AES_Sbox, calculate_HW
-import wandb # Import wandb
+from src.utils import evaluate, AES_Sbox, calculate_HW
 
 if __name__=="__main__":
     dataset = "CHES_2025"
-    model_type = "deepcnn_globalpool" #mlp, cnn
-    leakage = "ID" #ID, HW
+    model_type = "mlp" #mlp, cnn
+    leakage = "HW" #ID, HW
     train_models = True
     num_epochs = 50
-    total_num_models = 100
+    total_num_models = 2
     nb_traces_attacks = 1700
     total_nb_traces_attacks = 2000
-    model_index = 0
+
 
     if not os.path.exists('./Result/'):
         os.mkdir('./Result/')
@@ -44,10 +47,9 @@ if __name__=="__main__":
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True # Enable CUDA benchmarking
+    torch.backends.cudnn.benchmark = False
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}") # Print the device being used
 
     nb_attacks = 100
     if leakage == 'ID':
@@ -86,66 +88,32 @@ if __name__=="__main__":
     Y_attack = dataloadertrain.Y_attack
     plt_attack = dataloadertrain.plt_attack
     num_sample_pts = X_attack.shape[-1]
-    
-    # # Initialize wandb
-    # wandb.init(project="ches2025", entity="kaovichet11")  # Replace with your WandB username
-    # config = wandb.config  # Access hyperparameters from wandb.config
-    # print("wandb config:", config)
-    
-    # # Use wandb config instead of random search
-    # batch_size = config["batch_size"]
-    # num_workers = 0
-    
-    # dataloaders = {"train": torch.utils.data.DataLoader(dataloadertrain, batch_size=batch_size,
-    #                                                     shuffle=True,
-    #                                                     num_workers=num_workers),
-    #                "val": torch.utils.data.DataLoader(dataloaderval, batch_size=batch_size,
-    #                                                   shuffle=True, num_workers=num_workers)
-    #                }
-    # dataset_sizes = {"train": len(dataloadertrain), "val": len(dataloaderval)}
-
-    # model = trainer(config, num_epochs, num_sample_pts, dataloaders, dataset_sizes, model_type, classes, device)
-    # torch.save(model.state_dict(), model_root + "model_best.pth")
-    
-    # #Evaluate
-    # GE, NTGE = evaluate_fast(device, model, X_attack, plt_attack, correct_key,leakage_fn=leakage_fn, nb_attacks=100, total_nb_traces_attacks=2000, nb_traces_attacks=1700)
-    # np.save(model_root + "/result_best", {"GE": GE, "NTGE": NTGE})
-    
-    # # Log GE and NTGE to wandb
-    # wandb.log({"GE": GE[-1], "NTGE": NTGE})
-    
-    # wandb.finish()
-    
+    #Random Search
     for num_models in range(total_num_models):
-       if train_models == True:
-           config = create_hyperparameter_space(model_type)
-           np.save(model_root + "model_configuration_"+str(num_models)+".npy", config)
-           print("config:", config)
-           batch_size = config["batch_size"]
-           num_workers = 0
-           dataloaders = {"train": torch.utils.data.DataLoader(dataloadertrain, batch_size=batch_size,
-                                                               shuffle=True,
-                                                               num_workers=num_workers),
-                          "val": torch.utils.data.DataLoader(dataloaderval, batch_size=batch_size,
-                                                             shuffle=True, num_workers=num_workers)
-                          }
-           dataset_sizes = {"train": len(dataloadertrain), "val": len(dataloaderval)}
-    
-    
-    
-           model = trainer(config, num_epochs, num_sample_pts, dataloaders, dataset_sizes, model_type, classes, device)
-           torch.save(model.state_dict(), model_root + "model_"+str(num_models)+".pth")
-       else:
-           config = np.load(model_root + "model_configuration_"+str(num_models)+".npy", allow_pickle=True).item()
-           if model_type == "mlp":
-               model = MLP(config, num_sample_pts, classes).to(device)
-           elif model_type == "cnn":
-               model = CNN(config, num_sample_pts, classes).to(device)
-           elif model_type == "deepcnn_globalpool":
-               model = DeepCNN_GlobalPool(config, num_sample_pts, classes).to(device)
-           model.load_state_dict(torch.load(model_root + "model_"+str(num_models)+".pth"))
-       #Evaluate
-       GE, NTGE = evaluate_fast(device, model, X_attack, plt_attack, correct_key,leakage_fn=leakage_fn, nb_attacks=100, total_nb_traces_attacks=2000, nb_traces_attacks=1700)
-       np.save(model_root + "/result_"+str(num_models), {"GE": GE, "NTGE": NTGE})
-       model_index += 1
-       print("Model Index:", model_index)
+        if train_models == True:
+            config = create_hyperparameter_space(model_type)
+            np.save(model_root + "model_configuration_"+str(num_models)+".npy", config)
+            batch_size = config["batch_size"]
+            num_workers = 0
+            dataloaders = {"train": torch.utils.data.DataLoader(dataloadertrain, batch_size=batch_size,
+                                                                shuffle=True,
+                                                                num_workers=num_workers),
+                           "val": torch.utils.data.DataLoader(dataloaderval, batch_size=batch_size,
+                                                              shuffle=True, num_workers=num_workers)
+                           }
+            dataset_sizes = {"train": len(dataloadertrain), "val": len(dataloaderval)}
+
+
+
+            model = trainer(config, num_epochs, num_sample_pts, dataloaders, dataset_sizes, model_type, classes, device)
+            torch.save(model.state_dict(), model_root + "model_"+str(num_models)+".pth")
+        else:
+            config = np.load(model_root + "model_configuration_"+str(num_models)+".npy", allow_pickle=True).item()
+            if model_type == "mlp":
+                model = MLP(config, num_sample_pts, classes).to(device)
+            elif model_type == "cnn":
+                model = CNN(config, num_sample_pts, classes).to(device)
+            model.load_state_dict(torch.load(model_root + "model_"+str(num_models)+".pth"))
+        #Evaluate
+        # GE, NTGE = evaluate(device, model, X_attack, plt_attack, correct_key,leakage_fn=leakage_fn, nb_attacks=100, total_nb_traces_attacks=2000, nb_traces_attacks=1700)
+        # np.save(model_root + "/result_"+str(num_models), {"GE": GE, "NTGE": NTGE})
