@@ -227,7 +227,7 @@ def create_hyperparameter_space(model_type):
         return search_space
     elif model_type == "cnn":
         search_space = {"batch_size": random.randrange(100, 1001, 100),
-                                              "lr":random.choice( [1e-3, 5e-4, 1e-4, 5e-5, 1e-5]),  # 1e-3, 5e-3, 1e-4, 5e-4
+                                              "lr":random.choice( [1e-3, 5e-4, 1e-4, 5e-5, 1e-5]),
                                               "optimizer":random.choice(["RMSprop", "Adam"]),
                                               "layers": random.randrange(1, 8, 1),
                                               "neurons": random.choice( [10, 20, 50, 100, 200, 300, 400, 500]),

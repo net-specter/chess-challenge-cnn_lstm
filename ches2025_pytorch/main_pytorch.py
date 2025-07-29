@@ -12,7 +12,7 @@ from torchvision.transforms import transforms
 from src.dataloader import ToTensor_trace, Custom_Dataset
 from src.net import create_hyperparameter_space, MLP, CNN
 from src.trainer import trainer
-from src.utils import evaluate, AES_Sbox, calculate_HW
+from src.utils import evaluate_fast, AES_Sbox, calculate_HW
 
 if __name__=="__main__":
     dataset = "CHES_2025"
@@ -65,8 +65,8 @@ if __name__=="__main__":
 
 
 
-    dataloadertrain = Custom_Dataset(root='./../', dataset=dataset, leakage="ID",
-                                                 transform=transforms.Compose([ToTensor_trace()]))
+    dataloadertrain = Custom_Dataset(root='./../', dataset=dataset, leakage="HW",
+                                                 transform=transforms.Compose([ToTensor_trace()]),clean_data=True)
 
     ##########################################################################
 
@@ -92,6 +92,7 @@ if __name__=="__main__":
     for num_models in range(total_num_models):
         if train_models == True:
             config = create_hyperparameter_space(model_type)
+            print("config:", config)
             np.save(model_root + "model_configuration_"+str(num_models)+".npy", config)
             batch_size = config["batch_size"]
             num_workers = 0
@@ -115,5 +116,5 @@ if __name__=="__main__":
                 model = CNN(config, num_sample_pts, classes).to(device)
             model.load_state_dict(torch.load(model_root + "model_"+str(num_models)+".pth"))
         #Evaluate
-        # GE, NTGE = evaluate(device, model, X_attack, plt_attack, correct_key,leakage_fn=leakage_fn, nb_attacks=100, total_nb_traces_attacks=2000, nb_traces_attacks=1700)
-        # np.save(model_root + "/result_"+str(num_models), {"GE": GE, "NTGE": NTGE})
+        GE, NTGE = evaluate_fast(device, model, X_attack, plt_attack, correct_key,leakage_fn=leakage_fn, nb_attacks=100, total_nb_traces_attacks=2000, nb_traces_attacks=1700)
+        np.save(model_root + "/result_"+str(num_models), {"GE": GE, "NTGE": NTGE})

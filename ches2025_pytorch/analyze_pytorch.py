@@ -8,7 +8,7 @@ from torchvision.transforms import transforms
 from src.dataloader import ToTensor_trace, Custom_Dataset
 from src.net import create_hyperparameter_space, MLP, CNN
 from src.trainer import trainer
-from src.utils import evaluate, AES_Sbox, calculate_HW
+from src.utils import evaluate_fast, AES_Sbox, calculate_HW
 
 if __name__=="__main__":
     dataset = "CHES_2025"
@@ -30,7 +30,7 @@ if __name__=="__main__":
 
 
     ##################please do not touch this code below###################
-    dataloadertest = Custom_Dataset(root='./../', dataset=dataset, leakage="ID", #change root to where you download your dataset.
+    dataloadertest = Custom_Dataset(root='./../', dataset=dataset, leakage="HW", #change root to where you download your dataset.
                                                  transform=transforms.Compose([ToTensor_trace()]))
     #########################################################################
     if leakage == 'ID':
@@ -72,5 +72,5 @@ if __name__=="__main__":
 
 
     ####All model will be evaluated based on this function, if it does not adhere to the following, it will be eliminated. ##################
-    GE, NTGE = evaluate(device, model, X_attack, plt_attack, correct_key, leakage_fn=leakage_fn, nb_attacks=100,
+    GE, NTGE = evaluate_fast(device, model, X_attack, plt_attack, correct_key, leakage_fn=leakage_fn, nb_attacks=100,
                         total_nb_traces_attacks=2000, nb_traces_attacks=1700)

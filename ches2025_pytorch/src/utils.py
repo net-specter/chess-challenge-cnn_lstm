@@ -1,6 +1,7 @@
 import math
 import random
-
+import numpy as np, torch, torch.nn.functional as F
+from torch.utils.data import TensorDataset, DataLoader
 import h5py
 import numpy as np
 from sklearn.metrics import accuracy_score
@@ -59,6 +60,9 @@ def load_ctf_2025(filename, leakage_model='HW', byte = 0, train_begin = 0, train
     X_profiling = np.array(in_file['Profiling_traces/traces'])
     X_profiling = X_profiling.reshape((X_profiling.shape[0], X_profiling.shape[1]))
 
+    print(f"DEBUG: Raw profiling traces from HDF5 - Shape: {X_profiling.shape}")
+    print(f"DEBUG: Data type: {X_profiling.dtype}")
+    print(f"DEBUG: Sample values: {X_profiling[0, :10]}")
 
     P_profiling = np.array(in_file['Profiling_traces/metadata'][:]['plaintext'][:, byte])
     if byte != 0:
@@ -77,6 +81,8 @@ def load_ctf_2025(filename, leakage_model='HW', byte = 0, train_begin = 0, train
     # Load attack traces
     X_attack = np.array(in_file['Attack_traces/traces'])
     X_attack = X_attack.reshape((X_attack.shape[0], X_attack.shape[1]))
+
+    print(f"DEBUG: Raw attack traces from HDF5 - Shape: {X_attack.shape}")
 
     P_attack = np.array(in_file['Attack_traces/metadata'][:]['plaintext'][:, byte])
     attack_key = np.array(in_file['Attack_traces/metadata'][:]['key'][0, byte]) #Get the real key here (note that attack key are fixed)
@@ -241,3 +247,62 @@ def evaluate(device, model, X_attack, plt_attack,correct_key,leakage_fn, nb_atta
     print("GE", GE)
     print("NTGE", NTGE)
     return GE,NTGE
+
+import numpy as np, torch, torch.nn.functional as F
+from torch.utils.data import TensorDataset, DataLoader
+from src.utils import AES_Sbox, NTGE_fn                 # keep your utils
+HW = np.array([bin(x).count("1") for x in range(256)]) # 0-8 lookup
+
+def evaluate_fast(device, model,
+                  X_attack, plt_attack, correct_key,
+                  leakage_fn,
+                  nb_attacks              = 100,
+                  total_nb_traces_attacks = 2000,
+                  nb_traces_attacks       = 1700,
+                  batch_size              = 512):
+
+    model.eval()
+
+    # ---------- 1. forward pass in batches ------------------------------- #
+    ds     = TensorDataset(torch.from_numpy(X_attack[:total_nb_traces_attacks]))
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False)
+
+    logp_chunks = []
+    with torch.no_grad(), torch.amp.autocast(device_type='cuda'):
+        for (batch,) in loader:
+            batch  = batch.to(device).unsqueeze(1).float()
+            logits = model(batch)
+            logp_chunks.append(F.log_softmax(logits, dim=1).cpu())
+    logp = torch.cat(logp_chunks).numpy()          # (N, C)
+    C    = logp.shape[1]                           # 256 or 9
+
+    # ---------- 2. prep containers -------------------------------------- #
+    key_probs_runs = np.zeros((nb_attacks, 256), dtype=np.float64)
+    GE_curve       = np.empty(nb_traces_attacks, dtype=np.float32)
+
+    shuffles = [np.random.permutation(total_nb_traces_attacks)
+                for _ in range(nb_attacks)]
+
+    # ---------- 3. vectorised rank update -------------------------------- #
+    for t in range(nb_traces_attacks):
+        idxs     = np.array([s[t] for s in shuffles])    # (A,)
+        lp_slice = logp[idxs]                            # (A, C)
+        pt_slice = plt_attack[idxs]                      # (A,)
+
+        if C == 256:                                     # ID leakage
+            indices = pt_slice[:, None] ^ np.arange(256)     # (A,256)
+        else:                                            # HW leakage (C==9)
+            xor     = pt_slice[:, None] ^ np.arange(256)      # (A,256)
+            indices = HW[AES_Sbox[xor]]                       # map→0-8
+
+        aligned = np.take_along_axis(lp_slice, indices, axis=1)  # (A,256)
+        key_probs_runs += aligned
+
+        ranks = np.argsort(np.argsort(-key_probs_runs, axis=1), axis=1)
+        GE_curve[t] = ranks[:, correct_key].mean()
+
+    NTGE = NTGE_fn(GE_curve)
+    print(f'GE: {GE_curve}')
+    print(f"GE: {GE_curve[-1]:.2f}  |  NTGE: {NTGE:.0f}")
+
+    return GE_curve, NTGE
