@@ -16,9 +16,8 @@ class Custom_Dataset(Dataset):
                  moving_avg_window=5,
                  savgol_window=15,
                  savgol_poly=3,
-                 roi_extraction=True,
-                 roi_percentile=95,
-                 roi_width=200,
+                 poi_selection=True,
+                 num_poi=3000,
                  select_best_traces=False,
                  num_best_traces=35000,
                  apply_median_filter=True,
@@ -46,9 +45,8 @@ class Custom_Dataset(Dataset):
                 moving_avg_window=moving_avg_window,
                 savgol_window=savgol_window,
                 savgol_poly=savgol_poly,
-                roi_extraction=roi_extraction,
-                roi_percentile=roi_percentile,
-                roi_width=roi_width,
+                poi_selection=poi_selection,
+                num_poi=num_poi,
                 apply_median_filter=apply_median_filter,
                 median_window=median_window,
                 apply_butterworth=apply_butterworth,
@@ -60,14 +58,14 @@ class Custom_Dataset(Dataset):
                 moving_avg_window=moving_avg_window,
                 savgol_window=savgol_window,
                 savgol_poly=savgol_poly,
-                roi_extraction=roi_extraction,
-                roi_percentile=roi_percentile,
-                roi_width=roi_width,
+                poi_selection=poi_selection,
+                num_poi=num_poi,
                 apply_median_filter=apply_median_filter,
                 median_window=median_window,
                 apply_butterworth=apply_butterworth,
                 butterworth_cutoff=butterworth_cutoff,
-                butterworth_order=butterworth_order
+                butterworth_order=butterworth_order,
+                poi_indices=getattr(self, 'poi_indices', None)  # Use same POI indices as profiling
             )
             print(f"Cleaned trace length: {self.X_profiling.shape[1]} samples")
             
@@ -85,11 +83,12 @@ class Custom_Dataset(Dataset):
         self.X_attack = self.scaler_std.transform(self.X_attack)
 
     def clean_traces(self, traces, moving_avg_window=5, savgol_window=15, savgol_poly=3,
-                    roi_extraction=True, roi_percentile=95, roi_width=100,
+                    poi_selection=True, num_poi=3000,
                     apply_median_filter=True, median_window=3,
-                    apply_butterworth=False, butterworth_cutoff=0.1, butterworth_order=3):
+                    apply_butterworth=False, butterworth_cutoff=0.1, butterworth_order=3,
+                    poi_indices=None):
         """
-        Apply comprehensive signal processing techniques to clean traces
+        Apply comprehensive signal processing techniques to clean traces with POI selection
         
         Parameters:
         -----------
@@ -101,12 +100,10 @@ class Custom_Dataset(Dataset):
             Window size for Savitzky-Golay filter (advanced smoothing)
         savgol_poly : int
             Polynomial order for Savitzky-Golay filter
-        roi_extraction : bool
-            Whether to extract regions of interest based on variance
-        roi_percentile : float
-            Percentile to use for identifying POIs (0-100)
-        roi_width : int
-            Width of region around POI to extract
+        poi_selection : bool
+            Whether to apply POI selection based on SNR
+        num_poi : int
+            Number of top POIs to select (default: 3000)
         apply_median_filter : bool
             Whether to apply median filtering for additional noise reduction
         median_window : int
@@ -117,20 +114,22 @@ class Custom_Dataset(Dataset):
             Cutoff frequency for Butterworth filter (0-1)
         butterworth_order : int
             Order of Butterworth filter
+        poi_indices : np.ndarray, optional
+            Pre-computed POI indices (for attack traces to use same POIs as profiling)
             
         Returns:
         --------
         np.ndarray
-            Cleaned traces
+            Cleaned traces with POI selection applied
         """
-        """Step 1: Applying Moving Average Filter for denoising..."""
+        print("Step 1: Applying Moving Average Filter for denoising...")
         cleaned_traces = traces.copy()
         
         # 1. Moving Average Filter (uniform_filter1d) - Denoise by smoothing fluctuations
         cleaned_traces = np.array([uniform_filter1d(trace, size=moving_avg_window) 
                                  for trace in cleaned_traces])
         
-        """Step 2: Applying Savitzky-Golay Filter for advanced smoothing..."""
+        print("Step 2: Applying Savitzky-Golay Filter for advanced smoothing...")
         # 2. Savitzky-Golay Filter - Advanced smoothing while preserving features
         # Ensure window is odd and greater than polynomial order
         if savgol_window % 2 == 0:
@@ -143,91 +142,79 @@ class Custom_Dataset(Dataset):
         
         # 3. Apply Median Filtering for additional noise reduction
         if apply_median_filter:
-            """Step 3: Applying Median Filter for noise reduction..."""
+            print("Step 3: Applying Median Filter for noise reduction...")
             cleaned_traces = np.array([medfilt(trace, kernel_size=median_window) 
                                      for trace in cleaned_traces])
         
         # 4. Apply Butterworth Filtering for frequency-based noise reduction
         if apply_butterworth:
-            """Step 4: Applying Butterworth Filter for frequency-based noise reduction..."""
+            print("Step 4: Applying Butterworth Filter for frequency-based noise reduction...")
             nyq = 0.5  # Nyquist frequency (assuming normalized frequency)
             normal_cutoff = butterworth_cutoff / nyq
             b, a = butter(butterworth_order, normal_cutoff, btype='low', analog=False)
             cleaned_traces = np.array([filtfilt(b, a, trace) for trace in cleaned_traces])
         
-        # 5. Standard Deviation Analysis to identify Points of Interest (POI)
-        if roi_extraction:
-            """Step 5: Analyzing standard deviation to identify Points of Interest..."""
-            std_dev = np.std(cleaned_traces, axis=0)
+        # 5. SNR-based POI Selection
+        if poi_selection:
+            print(f"Step 5: Applying SNR-based POI Selection for top {num_poi} points...")
+            if poi_indices is None:
+                # Calculate POI indices for profiling traces
+                poi_indices = self._calculate_poi_snr(cleaned_traces, num_poi)
+                # Store POI indices for later use with attack traces
+                self.poi_indices = poi_indices
             
-            # Find points with highest standard deviation (most informative)
-            poi_threshold = np.percentile(std_dev, roi_percentile)
-            poi_indices = np.where(std_dev >= poi_threshold)[0]
-            
-            print(f"Found {len(poi_indices)} points of interest above {roi_percentile}th percentile")
-            
-            if len(poi_indices) > 0:
-                # Find clusters of POIs to identify coherent regions
-                poi_clusters = self._find_poi_clusters(poi_indices, roi_width)
-                
-                # Extract the most informative region
-                if poi_clusters:
-                    # Select cluster with highest mean standard deviation
-                    cluster_std_means = [np.mean(std_dev[cluster]) for cluster in poi_clusters]
-                    best_cluster_idx = np.argmax(cluster_std_means)
-                    best_cluster = poi_clusters[best_cluster_idx]
-                    
-                    # Extract region around the center of best cluster
-                    center = int(np.mean(best_cluster))
-                    start = max(0, center - roi_width//2)
-                    end = min(traces.shape[1], center + roi_width//2)
-                    
-                    print(f"Extracting ROI: samples {start} to {end} (center at {center})")
-                    cleaned_traces = cleaned_traces[:, start:end]
-                else:
-                    print("No coherent POI clusters found, keeping full traces")
-            else:
-                print("No POIs found above threshold, keeping full traces")
-                
+            # Apply POI selection
+            cleaned_traces = cleaned_traces[:, poi_indices]
+            print(f"POI selection completed. New trace length: {cleaned_traces.shape[1]} samples")
+        
         return cleaned_traces
     
-    def _find_poi_clusters(self, poi_indices, roi_width):
+    def _calculate_poi_snr(self, traces, num_poi):
         """
-        Find clusters of Points of Interest
+        Calculate Points of Interest using Signal-to-Noise Ratio (SNR) analysis
         
         Parameters:
         -----------
-        poi_indices : np.ndarray
-            Indices of points of interest
-        roi_width : int
-            Maximum distance between points to be in same cluster
+        traces : np.ndarray
+            Cleaned traces to analyze (n_traces, n_samples)
+        num_poi : int
+            Number of top POIs to select
             
         Returns:
         --------
-        list
-            List of POI clusters
+        np.ndarray
+            Indices of the top POIs based on SNR
         """
-        if len(poi_indices) == 0:
-            return []
-            
-        poi_clusters = []
-        current_cluster = [poi_indices[0]]
+        print("Calculating SNR for POI selection...")
         
-        for i in range(1, len(poi_indices)):
-            # If current point is close to previous, add to current cluster
-            if poi_indices[i] - poi_indices[i-1] <= roi_width//4:
-                current_cluster.append(poi_indices[i])
-            else:
-                # Start a new cluster
-                if len(current_cluster) >= 3:  # Only keep clusters with multiple points
-                    poi_clusters.append(current_cluster)
-                current_cluster = [poi_indices[i]]
+        # Calculate signal (variance across traces) and noise (mean within-trace variance)
+        signal_variance = np.var(traces, axis=0)  # Variance across traces for each time point
+        noise_variance = np.mean(np.var(traces, axis=1))  # Average within-trace variance
         
-        # Add the last cluster if it's significant
-        if len(current_cluster) >= 3:
-            poi_clusters.append(current_cluster)
-            
-        return poi_clusters
+        # Calculate SNR for each time point
+        # Add small epsilon to avoid division by zero
+        epsilon = 1e-10
+        snr = signal_variance / (noise_variance + epsilon)
+        
+        # Alternative SNR calculation using standard deviation ratio
+        signal_std = np.std(traces, axis=0)
+        noise_std = np.mean([np.std(trace) for trace in traces])
+        snr_alt = signal_std / (noise_std + epsilon)
+        
+        # Use the standard variance-based SNR
+        snr_scores = snr
+        
+        # Get indices of top POIs
+        poi_indices = np.argsort(snr_scores)[-num_poi:]  # Top num_poi indices
+        poi_indices = np.sort(poi_indices)  # Sort to maintain temporal order
+        
+        print(f"SNR analysis completed:")
+        print(f"  - Signal variance range: {np.min(signal_variance):.6f} to {np.max(signal_variance):.6f}")
+        print(f"  - Average noise variance: {noise_variance:.6f}")
+        print(f"  - SNR range: {np.min(snr_scores):.6f} to {np.max(snr_scores):.6f}")
+        print(f"  - Selected {len(poi_indices)} POIs with SNR range: {snr_scores[poi_indices[0]]:.6f} to {snr_scores[poi_indices[-1]]:.6f}")
+        
+        return poi_indices
     
     def select_traces_by_noise(self, traces, labels, plaintexts, num_traces):
         """

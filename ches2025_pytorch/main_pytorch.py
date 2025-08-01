@@ -17,10 +17,10 @@ from src.utils import evaluate_fast, AES_Sbox, calculate_HW
 if __name__=="__main__":
     dataset = "CHES_2025"
     model_type = "mlp" #mlp, cnn
-    leakage = "HW" #ID, HW
+    leakage = "ID" #ID, HW
     train_models = True
     num_epochs = 50
-    total_num_models = 2
+    total_num_models = 100
     nb_traces_attacks = 1700
     total_nb_traces_attacks = 2000
 
@@ -65,8 +65,22 @@ if __name__=="__main__":
 
 
 
-    dataloadertrain = Custom_Dataset(root='./../', dataset=dataset, leakage="HW",
-                                                 transform=transforms.Compose([ToTensor_trace()]),clean_data=True)
+    dataloadertrain = Custom_Dataset(root='./../', dataset=dataset, leakage="ID",
+                                     transform=transforms.Compose([ToTensor_trace()]),
+                                     clean_data=True,
+                                     # POI Selection parameters
+                                     poi_selection=True,
+                                     num_poi=3500,  # Top 3500 Points of Interest
+                                     # Signal processing parameters
+                                     moving_avg_window=5,
+                                     savgol_window=15,
+                                     savgol_poly=3,
+                                     apply_median_filter=True,
+                                     median_window=3,
+                                     apply_butterworth=False,
+                                     # Trace selection parameters
+                                     select_best_traces=False,
+                                     num_best_traces=35000)
 
     ##########################################################################
 
@@ -116,5 +130,5 @@ if __name__=="__main__":
                 model = CNN(config, num_sample_pts, classes).to(device)
             model.load_state_dict(torch.load(model_root + "model_"+str(num_models)+".pth"))
         #Evaluate
-        GE, NTGE = evaluate_fast(device, model, X_attack, plt_attack, correct_key,leakage_fn=leakage_fn, nb_attacks=100, total_nb_traces_attacks=2000, nb_traces_attacks=1700)
+        GE, NTGE = evaluate_fast(device, model, X_attack, plt_attack, correct_key,leakage_fn=leakage_fn, nb_attacks=100, total_nb_traces_attacks=2000, nb_traces_attacks=1700,batch_size=config["batch_size"])
         np.save(model_root + "/result_"+str(num_models), {"GE": GE, "NTGE": NTGE})

@@ -12,11 +12,24 @@ def trainer(config,num_epochs,num_sample_pts, dataloaders,dataset_sizes,model_ty
         model = CNN(config, num_sample_pts, classes).to(device)
     weight_init(model, config['kernel_initializer'])
     # Creates the optimizer
+    weight_decay = config.get("weight_decay", 1e-6)
     lr = config["lr"]
+    
     if config["optimizer"] == "Adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    elif config["optimizer"] == "AdamW":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    elif config["optimizer"] == "RAdam":
+        optimizer = torch.optim.RAdam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    elif config["optimizer"] == "NAdam":
+        optimizer = torch.optim.NAdam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    elif config["optimizer"] == "SGD":
+        # Only use momentum if it's provided in config and optimizer is SGD
+        momentum = config.get("momentum", 0.9)
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum, nesterov=True, weight_decay=weight_decay)
     elif config["optimizer"] == "RMSprop":
-        optimizer = torch.optim.RMSprop(model.parameters(), lr=lr)
+        optimizer = torch.optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
+
 
     # This is the trainning Loop
     criterion = nn.CrossEntropyLoss()

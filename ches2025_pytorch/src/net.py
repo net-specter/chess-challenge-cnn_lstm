@@ -215,19 +215,35 @@ def weight_init(m, type = 'kaiming_uniform_'):
 
 
 def create_hyperparameter_space(model_type):
+    # if model_type == "mlp":
+    #     search_space = {"batch_size": random.randrange(100, 1001, 100),
+    #                                                "lr": random.choice( [1e-3, 5e-4, 1e-4, 5e-5, 1e-5]),  # 1e-3, 5e-3, 1e-4, 5e-4
+    #                                                 "optimizer": random.choice( ["RMSprop", "Adam"]),
+    #                                                 "layers": random.randrange(1, 8, 1),
+    #                                                 "neurons": random.choice( [10, 20, 50, 100, 200, 300, 400, 500]),
+    #                                                 "activation": random.choice(  ["relu", "selu", "elu", "tanh"]),
+    #                                                 "kernel_initializer": random.choice(["random_uniform", "glorot_uniform", "he_uniform"]),
+    #                                             }
+    #     return search_space
     if model_type == "mlp":
-        search_space = {"batch_size": random.randrange(100, 1001, 100),
-                                                   "lr": random.choice( [1e-3, 5e-4, 1e-4, 5e-5, 1e-5]),  # 1e-3, 5e-3, 1e-4, 5e-4
-                                                    "optimizer": random.choice( ["RMSprop", "Adam"]),
-                                                    "layers": random.randrange(1, 8, 1),
-                                                    "neurons": random.choice( [10, 20, 50, 100, 200, 300, 400, 500]),
-                                                    "activation": random.choice(  ["relu", "selu", "elu", "tanh"]),
-                                                    "kernel_initializer": random.choice(["random_uniform", "glorot_uniform", "he_uniform"]),
-                                                }
-        return search_space
+        search_space = {
+            "batch_size": random.choice([256, 512, 1024]), # GPU-friendly powers of 2
+            "lr": random.choice([5e-5, 1e-5, 5e-6]), # Centered around successful LR
+            "optimizer": random.choice(["AdamW", "RAdam", "Adam", "NAdam", "SGD"]), # Expanded for sweep
+            "dropout_rate": random.choice([0.0, 0.1, 0.2, 0.3]), # Added, starting with low values (your success had none)
+            "weight_decay": random.choice([0.0, 1e-5, 1e-4, 1e-3]), # Stronger range than 1e-6
+            "layers": random.randrange(5, 8), # Focus around your successful 6 layers (5-7)
+            "neurons": random.choice([20, 50, 100, 200]), # Small, but allow exploration around 20 (your previous success)
+            "activation": random.choice(["relu", "leaky_relu", "elu", "tanh"]), # Include leaky_relu, as you like ELU/ReLU family
+            "kernel_initializer": random.choice(["he_uniform", "glorot_uniform"]), # Removed random_uniform
+        }
+        
+    #     # Only add momentum if SGD is selected
+    #     if search_space["optimizer"] == "SGD":
+    #         search_space["momentum"] = random.choice([0.9, 0.95, 0.99])
     elif model_type == "cnn":
         search_space = {"batch_size": random.randrange(100, 1001, 100),
-                                              "lr":random.choice( [1e-3, 5e-4, 1e-4, 5e-5, 1e-5]),
+                                              "lr":random.choice( [1e-3, 5e-4, 1e-4, 5e-5, 1e-5]),  # 1e-3, 5e-3, 1e-4, 5e-4
                                               "optimizer":random.choice(["RMSprop", "Adam"]),
                                               "layers": random.randrange(1, 8, 1),
                                               "neurons": random.choice( [10, 20, 50, 100, 200, 300, 400, 500]),

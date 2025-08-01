@@ -60,10 +60,6 @@ def load_ctf_2025(filename, leakage_model='HW', byte = 0, train_begin = 0, train
     X_profiling = np.array(in_file['Profiling_traces/traces'])
     X_profiling = X_profiling.reshape((X_profiling.shape[0], X_profiling.shape[1]))
 
-    print(f"DEBUG: Raw profiling traces from HDF5 - Shape: {X_profiling.shape}")
-    print(f"DEBUG: Data type: {X_profiling.dtype}")
-    print(f"DEBUG: Sample values: {X_profiling[0, :10]}")
-
     P_profiling = np.array(in_file['Profiling_traces/metadata'][:]['plaintext'][:, byte])
     if byte != 0:
         key_profiling = np.array(in_file['Profiling_traces/metadata'][:]['key'][:,byte])
@@ -81,8 +77,6 @@ def load_ctf_2025(filename, leakage_model='HW', byte = 0, train_begin = 0, train
     # Load attack traces
     X_attack = np.array(in_file['Attack_traces/traces'])
     X_attack = X_attack.reshape((X_attack.shape[0], X_attack.shape[1]))
-
-    print(f"DEBUG: Raw attack traces from HDF5 - Shape: {X_attack.shape}")
 
     P_attack = np.array(in_file['Attack_traces/metadata'][:]['plaintext'][:, byte])
     attack_key = np.array(in_file['Attack_traces/metadata'][:]['key'][0, byte]) #Get the real key here (note that attack key are fixed)
